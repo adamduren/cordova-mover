@@ -8,6 +8,12 @@
     <name>Mover</name>
     <description>SFTP Plugin</description>
 
+    <asset src="www/mover.js" target="js/mover.js"/>
+
+    <js-module src="www/mover.js" name="mover">
+        <clobbers target="mover" />
+    </js-module>
+
     <platform name="android">
 
         <config-file target="res/xml/config.xml" parent="/*">
@@ -17,6 +23,7 @@
         </config-file>
 
         <source-file src="src/android/Mover.java" target-dir="src/com/alto/mover" />
+        <source-file src="lib/android/jsch-0.1.51.jar" target-dir="libs" />
 
      </platform>
 </plugin>

@@ -4,7 +4,6 @@ import java.io.OutputStream;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
-import org.apache.cordova.PluginResult;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -15,22 +14,22 @@ import com.jcraft.jsch.*;
 public class Mover extends CordovaPlugin {
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-        if (action.equals("hello")) {
-            String host = args.getString(0);
-            String password = args.getString(1);
-            this.hello(host, password, callbackContext);
+        if (action.equals("testConnection")) {
+            JSONObject hostConfig = args.getJSONObject(0);
+            String user = hostConfig.getString("user");
+            String password = hostConfig.getString("password");
+            String host = hostConfig.getString("host");
+            int port = hostConfig.optInt("port", 22);
+            this.testConnection(user, password, host, port, callbackContext);
             return true;
         }
         return false;
     }
 
-    private void hello(String host, String password, CallbackContext callbackContext) {
+    private void testConnection(String user, String password, String host, int port, CallbackContext callbackContext) {
         try {
             JSch jsch = new JSch();
-            int port = 22;
-
-            String user = host.substring(0, host.indexOf('@'));
-            host = host.substring(host.indexOf('@') + 1);
+            String testFilename = "_altoTest";
 
             Session session = jsch.getSession(user, host, port);
             session.setPassword(password);
@@ -39,16 +38,17 @@ public class Mover extends CordovaPlugin {
 
             ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
             channel.connect();
-            OutputStream output = channel.put("test.txt");
 
-            output.write("testing".getBytes());
+            OutputStream output = channel.put(testFilename);
+            output.write("Hello Alto".getBytes());
             output.close();
 
+            channel.rm(testFilename);
             channel.exit();
 
-            callbackContext.success("Yay");
+            callbackContext.success();
         } catch (Exception e) {
-            callbackContext.success(e.getMessage());
+            callbackContext.error(e.getMessage());
         }
     }
 }
