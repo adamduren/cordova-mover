@@ -1,5 +1,6 @@
 package com.alto.mover;
 
+import android.content.ContentResolver;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.MediaStore;
@@ -15,27 +16,28 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 
 class UploadResult {
-    private JSONArray cards;
+    private JSONArray results;
 
     UploadResult() {
-        cards = new JSONArray();
+        results = new JSONArray();
     }
 
-    public JSONArray getCards () {
-        return cards;
+    public JSONArray getResults() {
+        return results;
     }
 
     private void addResult(String id, boolean success) throws JSONException {
         JSONObject result = new JSONObject();
-        result.put("success", id);
-        result.put("id", success);
-        cards.put(result);
+        result.put("success", success);
+        result.put("id", id);
+        results.put(result);
     }
 
     public void addSuccess(String id) throws JSONException {
@@ -47,9 +49,9 @@ class UploadResult {
 
     }
 
-    public void addAllCards(JSONArray cards) throws JSONException {
-        for (int i=0; i<cards.length(); i++) {
-            addSuccess(cards.getString(i));
+    public void addAllResults(JSONArray newResults) throws JSONException {
+        for (int i=0; i<newResults.length(); i++) {
+            results.put(newResults.get(i));
         }
     }
 }
@@ -126,36 +128,111 @@ class Cloud extends  Model {
 }
 
 class Card extends Model {
-    String id;
     String name;
     String text;
-    boolean synced;
+    Integer status;
     String cloudId;
-    String imageURI;
-    String videoURI;
+    Uri _imageURI;
+    Uri _videoURI;
+    ContentResolver _resolver;
 
-    public Card(JSONObject card) throws JSONException {
+    public Card(JSONObject card, ContentResolver resolver) throws JSONException {
         super(card);
 
-        this.cloudId = card.getString("cloudId");
-        this.imageURI = card.optString("imageURI");
-        this.name = card.getString("name");
-        this.text = card.optString("text");
-        this.synced = card.getBoolean("synced");
-        this.videoURI = card.getString("videoURI");
+        cloudId = card.getString("cloudId");
+        name = card.getString("name");
+        text = card.optString("text");
+        status = card.getInt("status");
+        _resolver = resolver;
+
+        if (!card.optString("imageURI").isEmpty()) {
+            _imageURI = Uri.parse(card.optString("imageURI"));
+        }
+
+        if (!card.optString("videoURI").isEmpty()) {
+            _videoURI = Uri.parse(card.optString("videoURI"));
+        }
     }
 
     public JSONObject toJSON() throws JSONException {
         JSONObject card = super.toJSON();
 
         card.put("cloudId", cloudId);
-        card.put("imageURI", imageURI);
+        card.put("_imageURI", _imageURI);
+        card.put("imageURI", getImagePrivateStoragePath());
+        card.put("videoURI", getVideoPrivateStoragePath());
+        card.put("_videoURI", _videoURI);
         card.put("name", name);
         card.put("text", text);
-        card.put("synced", synced);
-        card.put("videoURI", videoURI);
+        card.put("status", status);
 
         return card;
+    }
+
+    public String getImageFilename() {
+        if (!hasImage()) {
+            return null;
+        }
+        return getFilenameFromUri(_imageURI);
+    }
+
+    public String getVideoFilename() {
+        if (!hasVideo()) {
+            return null;
+        }
+        return getFilenameFromUri(_videoURI);
+    }
+
+    private String getFilenameFromUri(Uri uri) {
+        String path = getRealPathFromURI(uri);
+        String[] parts = path.split("/");
+        return parts[parts.length-1];
+    }
+
+    private String getRealPathFromURI(Uri contentUri) {
+        Cursor cursor = null;
+
+        try {
+            String[] proj = { MediaStore.Images.Media.DATA };
+            cursor = _resolver.query(contentUri,  proj, null, null, null);
+            int column_index = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
+            cursor.moveToFirst();
+            return cursor.getString(column_index);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+    }
+
+    public boolean hasImage() {
+        return _imageURI != null;
+    }
+
+    public boolean hasVideo() {
+        return _videoURI != null;
+    }
+
+    public InputStream getImage() throws FileNotFoundException {
+        return _resolver.openInputStream(_imageURI);
+    }
+
+    public String getPrivateStorageDir() {
+    return id + "_media";
+    }
+
+    public String getImagePrivateStoragePath() {
+        if (!hasImage()) {
+            return null;
+        }
+        return getPrivateStorageDir() + "/" + getImageFilename();
+    }
+
+    public String getVideoPrivateStoragePath() {
+        if (!hasVideo()) {
+            return null;
+        }
+        return getPrivateStorageDir() + "/" + getVideoFilename();
     }
 }
 
@@ -166,6 +243,7 @@ public class MoverService extends BackgroundService {
     Log mLog;
 
     protected void connect(Cloud cloud) throws JSONException, SftpException, JSchException {
+        mLog.addMessage("Connecting");
         JSch jsch = new JSch();
 
         mSession = jsch.getSession(cloud.user, cloud.host, cloud.port);
@@ -180,9 +258,10 @@ public class MoverService extends BackgroundService {
     protected ArrayList<Card> getCardsForCloud(Cloud cloud, JSONArray cards) throws JSONException {
         String currentCloudId = cloud.id;
         ArrayList<Card> cardsInCloud = new ArrayList<Card>();
+        ContentResolver resolver = getContentResolver();
 
         for (int i=0; i<cards.length(); i++) {
-            Card card = new Card(cards.getJSONObject(i));
+            Card card = new Card(cards.getJSONObject(i), resolver);
             if (currentCloudId.equals(card.cloudId)) {
                 cardsInCloud.add(card);
             }
@@ -230,12 +309,6 @@ public class MoverService extends BackgroundService {
         }
     }
 
-    protected String getFilenameFromUri(Uri uri) {
-        String path = getRealPathFromURI(uri);
-        String[] parts = path.split("/");
-        return parts[parts.length-1];
-    }
-
     private boolean uploadCard(Card card){
         boolean success;
 
@@ -246,19 +319,15 @@ public class MoverService extends BackgroundService {
             output.write(card.toJSON().toString().getBytes());
             output.close();
 
-            if (!card.imageURI.equals("")) {
-                String mediaDir = card.id + "_media";
-                Uri cardImageUri = Uri.parse(card.imageURI);
-                String imageDest = mediaDir + "/" + getFilenameFromUri(cardImageUri);
+            if (card.hasImage()) {
+                ensurePath(card.getPrivateStorageDir());
 
-                mLog.addMessage("Trying to open " + card.imageURI);
-                InputStream input = getContentResolver().openInputStream(cardImageUri);
+                mLog.addMessage("Trying to open " + card._imageURI);
+                InputStream input = card.getImage();
                 mLog.addMessage("File opened");
 
-                ensurePath(mediaDir);
-
-                mLog.addMessage("Saving to " + imageDest);
-                output = mChannel.put(imageDest);
+                mLog.addMessage("Saving to " + card.getPrivateStorageDir());
+                output = mChannel.put(card.getImagePrivateStoragePath());
                 copy(input, output);
                 output.close();
             }
@@ -276,18 +345,13 @@ public class MoverService extends BackgroundService {
 
         try {
             mLog.addMessage("On cloud " + cloud.name);
-
-            String privateDirectory = cloud.privateDirectory;
-
-            mLog.addMessage("Connecting");
             connect(cloud);
 
             mLog.addMessage("In directory " + mChannel.pwd());
+            ensurePath(cloud.privateDirectory);
 
-            ensurePath(privateDirectory);
-
-            mLog.addMessage("Changing to directory " + privateDirectory);
-            mChannel.cd(privateDirectory);
+            mLog.addMessage("Changing to directory " + cloud.privateDirectory);
+            mChannel.cd(cloud.privateDirectory);
 
             for (int i=0; i<cards.size(); i++) {
                 Card card = cards.get(i);
@@ -308,22 +372,6 @@ public class MoverService extends BackgroundService {
         return result;
     }
 
-    public String getRealPathFromURI(Uri contentUri) {
-        Cursor cursor = null;
-
-        try {
-            String[] proj = { MediaStore.Images.Media.DATA };
-            cursor = getContentResolver().query(contentUri,  proj, null, null, null);
-            int column_index = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA);
-            cursor.moveToFirst();
-            return cursor.getString(column_index);
-        } finally {
-            if (cursor != null) {
-                cursor.close();
-            }
-        }
-    }
-
     @Override
     protected JSONObject doWork() {
         JSONObject result = new JSONObject();
@@ -338,15 +386,16 @@ public class MoverService extends BackgroundService {
                 Cloud cloud = new Cloud(clouds.getJSONObject(i));
                 ArrayList<Card> cardsInCloud = getCardsForCloud(cloud, cards);
 
+                // Keeps from making unnecessary connections to clouds
                 if (cardsInCloud.isEmpty()) {
                     continue;
                 }
 
-                uploadResult.addAllCards(processCloud(cloud, cardsInCloud).getCards());
+                uploadResult.addAllResults(processCloud(cloud, cardsInCloud).getResults());
             }
 
             // We also provide the same message in our JSON Result
-            result.put("updatedCards", uploadResult.getCards());
+            result.put("updatedCards", uploadResult.getResults());
         } catch (JSONException e) {
             // In production code, you would have some exception handling here
             try {
