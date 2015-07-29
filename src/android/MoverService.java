@@ -145,11 +145,11 @@ class Card extends Model {
         status = card.getInt("status");
         _resolver = resolver;
 
-        if (!card.optString("imageURI").isEmpty()) {
+        if (!card.isNull("imageURI")) {
             _imageURI = Uri.parse(card.optString("imageURI"));
         }
 
-        if (!card.optString("videoURI").isEmpty()) {
+        if (!card.isNull("videoURI")) {
             _videoURI = Uri.parse(card.optString("videoURI"));
         }
     }
@@ -283,11 +283,12 @@ public class MoverService extends BackgroundService {
     }
 
     protected void ensurePath(String path, boolean excludeLast) throws SftpException {
-        mLog.addMessage("Ensuring path" + path);
+        mLog.addMessage("Ensuring path " + path);
 
         String buildPath = "";
         if (path.substring(0, 1).equals("/")) {
             path = path.substring(1);
+            buildPath += "/";
         }
 
         String[] pathSegments = path.split("/");
@@ -303,7 +304,7 @@ public class MoverService extends BackgroundService {
             try {
                 mChannel.stat(buildPath);
             } catch (Exception e) {
-                mLog.addMessage("Creating" + buildPath);
+                mLog.addMessage("Creating " + buildPath);
                 mChannel.mkdir(buildPath);
             }
         }
@@ -334,6 +335,7 @@ public class MoverService extends BackgroundService {
 
             success = true;
         } catch (Exception e) {
+            mLog.addMessage("Error" + e.getMessage());
             success = false;
         }
 
