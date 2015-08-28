@@ -1,5 +1,7 @@
 package com.alto.mover;
 
+import android.util.Log;
+
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
@@ -46,7 +48,7 @@ public class Mover extends CordovaPlugin {
             this.pwd(args.getString(0), callbackContext);
             return true;
         } else if (action.equals("put")) {
-            this.put(args.getString(0), args.getString(1), args.getString(2), args.getBoolean(3), callbackContext);
+            this.put(args.getString(0), args.getString(1), args.getJSONObject(2), args.getBoolean(3), callbackContext);
         } else if (action.equals("mkdir")) {
             this.mkdir(args.getString(0), args.getString(1), args.getBoolean(2), callbackContext);
         }  else if (action.equals("stat")) {
@@ -160,7 +162,7 @@ public class Mover extends CordovaPlugin {
         }
     }
 
-    private void put(String channelId, String name, String data, boolean ensurePath, CallbackContext callbackContext){
+    private void put(String channelId, String name, JSONObject dataContainer, boolean ensurePath, CallbackContext callbackContext) {
         ChannelSftp channel = channels.get(channelId);
 
         if (channel == null) {
@@ -173,8 +175,28 @@ public class Mover extends CordovaPlugin {
                 _ensurePath(channelId, name, true);
             }
 
+            String type = dataContainer.getString("type");
+
+            Log.w("alto", "Putting File of type " + type);
+
             OutputStream output = channel.put(name);
-            output.write(data.getBytes());
+            byte[] dataByteArray;
+
+            if (type.equals("Int8Array")) {
+               Log.w("alto", "Is Int8Array");
+
+                JSONArray dataArray = dataContainer.getJSONArray("data");
+                dataByteArray = new byte[dataArray.length()];
+
+                for (int i = 0; i<dataArray.length(); i++) {
+                    dataByteArray[i] = (byte) dataArray.getInt(i);
+                }
+            } else {
+                String data = dataContainer.getString("data");
+                dataByteArray = data.getBytes();
+            }
+            Log.w("alto", dataByteArray.toString());
+            output.write(dataByteArray);
             output.close();
             callbackContext.success(channel.pwd());
         } catch (Exception e){

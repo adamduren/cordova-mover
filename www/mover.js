@@ -1,4 +1,5 @@
-/*global cordova, module, Promise*/
+/* global cordova, module, Promise*/
+/* jshint esnext:true, browser:true */
 
 "use strict";
 
@@ -79,11 +80,22 @@ Connection.prototype.pwd = function pwd() {
 
 Connection.prototype.put = function put(name, data, ensurePath) {
   ensurePath = !!ensurePath;
+  let type = typeof(data);
+  let dataContainer = {};
 
   if (typeof data === 'object') {
-    data = JSON.stringify(data);
+    if (window.ArrayBuffer.isView(data)) {
+      dataContainer.data = Array.from(data);
+      dataContainer.type = 'Int8Array';
+    } else {
+      dataContainer.data = JSON.stringify(data);
+      dataContainer.type = 'string';
+    }
+  } else {
+    dataContainer.data = data;
+    dataContainer.type = type;
   }
-  return promiseHelper('put', [this.key, name, data, ensurePath]);
+  return promiseHelper('put', [this.key, name, dataContainer, ensurePath]);
 };
 
 Connection.prototype.stat = function put(path) {
