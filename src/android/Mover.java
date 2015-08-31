@@ -10,6 +10,8 @@ import com.jcraft.jsch.SftpException;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
+import org.apache.cordova.PluginResult;
+import org.apache.cordova.file.FileUtils;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -22,10 +24,16 @@ import java.util.UUID;
 public class Mover extends CordovaPlugin {
     HashMap<String, ChannelSftp> channels = new HashMap();
 
+    private interface SftpOp {
+        void run(String channelId, ChannelSftp channel, JSONArray args) throws Exception;
+    }
 
     @Override
-    public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
+    public boolean execute(final String action, final String rawArgs, final CallbackContext callbackContext) throws JSONException {
+        Log.i("Wimsy", "Executing action: " + action);
+
         if (action.equals("testConnection") || action.equals("connect")) {
+            JSONArray args = new JSONArray(rawArgs);
             JSONObject hostConfig = args.getJSONObject(0);
             String user = hostConfig.getString("user");
             String password = hostConfig.getString("password");
@@ -37,25 +45,33 @@ public class Mover extends CordovaPlugin {
             } else {
                 this.connect(user, password, host, port, callbackContext);
             }
-            return true;
         } else if (action.equals("disconnect")) {
+            JSONArray args = new JSONArray(rawArgs);
             this.disconnect(args.getString(0), callbackContext);
-            return true;
         } else if (action.equals("cd")) {
+            JSONArray args = new JSONArray(rawArgs);
             this.cd(args.getString(0), args.getString(1), callbackContext);
-            return true;
         } else if (action.equals("pwd")) {
+            JSONArray args = new JSONArray(rawArgs);
             this.pwd(args.getString(0), callbackContext);
-            return true;
         } else if (action.equals("put")) {
-            this.put(args.getString(0), args.getString(1), args.getJSONObject(2), args.getBoolean(3), callbackContext);
+            this.put(rawArgs, callbackContext);
         } else if (action.equals("mkdir")) {
+            JSONArray args = new JSONArray(rawArgs);
             this.mkdir(args.getString(0), args.getString(1), args.getBoolean(2), callbackContext);
         }  else if (action.equals("stat")) {
+            JSONArray args = new JSONArray(rawArgs);
             this.stat(args.getString(0), args.getString(1), callbackContext);
+        }  else if (action.equals("rm")) {
+            this.rm(rawArgs, callbackContext);
+        }  else if (action.equals("rmdir")) {
+            this.rmdir(rawArgs, callbackContext);
+        } else {
+            return false;
         }
 
-        return false;
+
+        return true;
     }
 
     private void testConnection(String user, String password, String host, int port, CallbackContext callbackContext) {
@@ -86,25 +102,30 @@ public class Mover extends CordovaPlugin {
         }
     }
 
-    private void connect(String user, String password, String host, int port, CallbackContext callbackContext) {
-        try {
-            JSch jsch = new JSch();
+    private void connect(final String user, final String password, final String host, final int port, final CallbackContext callbackContext) {
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
 
-            Session session = jsch.getSession(user, host, port);
-            session.setPassword(password);
-            session.setConfig("StrictHostKeyChecking", "no");
-            session.connect();
+                try {
+                    JSch jsch = new JSch();
 
-            ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
-            channel.connect();
+                    Session session = jsch.getSession(user, host, port);
+                    session.setPassword(password);
+                    session.setConfig("StrictHostKeyChecking", "no");
+                    session.connect();
 
-            String key = UUID.randomUUID().toString();
-            channels.put(key, channel);
+                    ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
+                    channel.connect();
 
-            callbackContext.success(key);
-        } catch (Exception e) {
-            callbackContext.error(e.getMessage());
-        }
+                    String key = UUID.randomUUID().toString();
+                    channels.put(key, channel);
+
+                    callbackContext.success(key);
+                } catch (Exception e) {
+                    callbackContext.error(e.getMessage());
+                }
+            }
+        });
     }
 
     private void disconnect(String channelId, CallbackContext callbackContext){
@@ -162,46 +183,87 @@ public class Mover extends CordovaPlugin {
         }
     }
 
-    private void put(String channelId, String name, JSONObject dataContainer, boolean ensurePath, CallbackContext callbackContext) {
-        ChannelSftp channel = channels.get(channelId);
+    private void put(final String rawArgs, final CallbackContext callbackContext) {
+        threadHelper(new SftpOp() {
+            @Override
+            public void run(String channelId, ChannelSftp channel, JSONArray args) throws Exception {
+                try {
+                    String name = args.getString(1);
+                    JSONObject dataContainer = args.getJSONObject(2);
+                    boolean ensurePath = args.getBoolean(3);
 
-        if (channel == null) {
-            callbackContext.error("Invalid channelId");
-            return;
-        }
+                    if (ensurePath) {
+                        _ensurePath(channelId, name, true);
+                    }
 
-        try {
-            if (ensurePath) {
-                _ensurePath(channelId, name, true);
-            }
+                    String type = dataContainer.getString("type");
 
-            String type = dataContainer.getString("type");
+                    Log.w("Wimsy", "Putting file " + name + " of type " + type);
 
-            Log.w("alto", "Putting File of type " + type);
+                    OutputStream output = channel.put(name);
 
-            OutputStream output = channel.put(name);
-            byte[] dataByteArray;
+                    byte[] dataByteArray;
 
-            if (type.equals("Int8Array")) {
-               Log.w("alto", "Is Int8Array");
+                    if (type.equals("Int8Array")) {
+                        Log.w("alto", "Is Int8Array");
 
-                JSONArray dataArray = dataContainer.getJSONArray("data");
-                dataByteArray = new byte[dataArray.length()];
+                        JSONArray dataArray = dataContainer.getJSONArray("data");
+                        dataByteArray = new byte[dataArray.length()];
 
-                for (int i = 0; i<dataArray.length(); i++) {
-                    dataByteArray[i] = (byte) dataArray.getInt(i);
+                        for (int i = 0; i < dataArray.length(); i++) {
+                            dataByteArray[i] = (byte) dataArray.getInt(i);
+                        }
+                    } else {
+                        String data = dataContainer.getString("data");
+                        dataByteArray = data.getBytes();
+                    }
+                    Log.w("alto", dataByteArray.toString());
+                    output.write(dataByteArray);
+                    output.close();
+                    callbackContext.success(channel.pwd());
+                } catch (Exception e) {
+                    Log.e("alto", e.getClass().getName() + ":" + e.getMessage());
+                    callbackContext.error(e.getMessage());
                 }
-            } else {
-                String data = dataContainer.getString("data");
-                dataByteArray = data.getBytes();
             }
-            Log.w("alto", dataByteArray.toString());
-            output.write(dataByteArray);
-            output.close();
-            callbackContext.success(channel.pwd());
-        } catch (Exception e){
-            callbackContext.error(e.getMessage());
-        }
+        }, rawArgs, callbackContext);
+
+    }
+
+    private void rm(final String rawArgs, final CallbackContext callbackContext) {
+        threadHelper(new SftpOp() {
+            @Override
+            public void run(String channelId, ChannelSftp channel, JSONArray args) throws JSONException {
+                String name = args.getString(1);
+                Log.w("Wimsy", "Deleting file " + name);
+
+                try {
+                    channel.rm(name);
+                    callbackContext.success();
+                } catch (SftpException e) {
+                    callbackContext.success("File not found");
+                }
+            }
+        }, rawArgs, callbackContext);
+
+    }
+
+    private void rmdir(final String rawArgs, final CallbackContext callbackContext) {
+        threadHelper(new SftpOp() {
+            @Override
+            public void run(String channelId, ChannelSftp channel, JSONArray args) throws JSONException {
+                String name = args.getString(1);
+                Log.w("Wimsy", "Deleting folder " + name);
+
+                try {
+                    channel.rmdir(name);
+                    callbackContext.success();
+                } catch (SftpException e) {
+                    callbackContext.success("File not found");
+                }
+            }
+        }, rawArgs, callbackContext);
+
     }
 
     private void mkdir(String channelId, String path, boolean recursive, CallbackContext callbackContext){
@@ -253,7 +315,6 @@ public class Mover extends CordovaPlugin {
             throw new Exception("Invalid channelId");
         }
 
-
         String buildPath = "";
         if (path.substring(0, 1).equals("/")) {
             path = path.substring(1);
@@ -278,5 +339,30 @@ public class Mover extends CordovaPlugin {
         }
     }
 
+    private void threadHelper(final SftpOp f, final String rawArgs, final CallbackContext callbackContext) {
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                try {
+                    JSONArray args = new JSONArray(rawArgs);
+                    String channelId = args.getString(0);
+                    ChannelSftp channel = channels.get(channelId);
 
+                    if (channel == null) {
+                        callbackContext.error("Invalid channelId");
+                        return;
+                    }
+                    synchronized (channel) {
+                        f.run(channelId, channel, args);
+                    }
+                } catch ( Exception e) {
+                    if (e instanceof JSONException ) {
+                        callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.JSON_EXCEPTION));
+                    } else {
+                        e.printStackTrace();
+                        callbackContext.error(FileUtils.UNKNOWN_ERR);
+                    }
+                }
+            }
+        });
+    }
 }

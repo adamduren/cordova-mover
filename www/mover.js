@@ -41,11 +41,10 @@ Connection.prototype.connect = function connect(user, password, host, port) {
   );
   var _this = this;
 
-  promise.then(function(key) {
+  return promise.then(function(key) {
     _this.key = key;
+    return _this;
   });
-
-  return promise;
 };
 
 Connection.prototype.disconnect = function disconnect() {
@@ -98,7 +97,15 @@ Connection.prototype.put = function put(name, data, ensurePath) {
   return promiseHelper('put', [this.key, name, dataContainer, ensurePath]);
 };
 
-Connection.prototype.stat = function put(path) {
+Connection.prototype.rm = function rm(name) {
+  return promiseHelper('rm', [this.key, name]);
+};
+
+Connection.prototype.rmdir = function rmdir(name) {
+  return promiseHelper('rmdir', [this.key, name]);
+};
+
+Connection.prototype.stat = function stat(path) {
   return promiseHelper('stat', [this.key, path]);
 };
 
