@@ -6,8 +6,9 @@ import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
-import com.jcraft.jsch.SftpException;
 
+import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPReply;
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.PluginResult;
@@ -16,68 +17,85 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.UUID;
 
 
 public class Mover extends CordovaPlugin {
-    HashMap<String, ChannelSftp> channels = new HashMap();
+    HashMap<String, ChannelSftp> mSftpChannels = new HashMap();
+    HashMap<String, FTPClient> mFtpChannels = new HashMap();
+
+    String mTestFilename = "_altoTest";
 
     private interface SftpOp {
-        void run(String channelId, ChannelSftp channel, JSONArray args) throws Exception;
+        void run(ChannelSftp channel, FTPClient client, JSONObject args) throws Exception;
     }
 
     @Override
     public boolean execute(final String action, final String rawArgs, final CallbackContext callbackContext) throws JSONException {
         Log.i("Wimsy", "Executing action: " + action);
 
-        if (action.equals("testConnection") || action.equals("connect")) {
-            JSONArray args = new JSONArray(rawArgs);
-            JSONObject hostConfig = args.getJSONObject(0);
-            String user = hostConfig.getString("user");
-            String password = hostConfig.getString("password");
-            String host = hostConfig.getString("host");
-            int port = hostConfig.optInt("port", 22);
-
-            if (action.equals("testConnection")) {
-                this.testConnection(user, password, host, port, callbackContext);
-            } else {
-                this.connect(user, password, host, port, callbackContext);
-            }
+        final JSONObject args = new JSONObject(rawArgs);
+        if (action.equals("testConnection")) {
+            this.testConnection(args, callbackContext);
+        } else if (action.equals("connect")) {
+            this.connect(args, callbackContext);
         } else if (action.equals("disconnect")) {
-            JSONArray args = new JSONArray(rawArgs);
-            this.disconnect(args.getString(0), callbackContext);
-        } else if (action.equals("cd")) {
-            JSONArray args = new JSONArray(rawArgs);
-            this.cd(args.getString(0), args.getString(1), callbackContext);
-        } else if (action.equals("pwd")) {
-            JSONArray args = new JSONArray(rawArgs);
-            this.pwd(args.getString(0), callbackContext);
+            this.disconnect(args, callbackContext);
         } else if (action.equals("put")) {
-            this.put(rawArgs, callbackContext);
-        } else if (action.equals("mkdir")) {
-            JSONArray args = new JSONArray(rawArgs);
-            this.mkdir(args.getString(0), args.getString(1), args.getBoolean(2), callbackContext);
-        }  else if (action.equals("stat")) {
-            JSONArray args = new JSONArray(rawArgs);
-            this.stat(args.getString(0), args.getString(1), callbackContext);
-        }  else if (action.equals("rm")) {
-            this.rm(rawArgs, callbackContext);
+            this.put(args, callbackContext);
+        } else if (action.equals("rm")) {
+            this.rm(args, callbackContext);
         }  else if (action.equals("rmdir")) {
-            this.rmdir(rawArgs, callbackContext);
+            this.rmdir(args, callbackContext);
         } else {
             return false;
         }
 
-
         return true;
     }
 
-    private void testConnection(String user, String password, String host, int port, CallbackContext callbackContext) {
+    private void _testConnectionFtp(String user, String password, String host, int port, CallbackContext callbackContext) {
+        FTPClient ftpClient = new FTPClient();
+        try {
+            ftpClient.connect(host, port);
+
+            int replyCode = ftpClient.getReplyCode();
+            if (!FTPReply.isPositiveCompletion(replyCode)) {
+                callbackContext.error("Operation failed. Server reply code: \" + replyCode");
+                return;
+            }
+
+            boolean success = ftpClient.login(user, password);
+
+            if (!success) {
+                callbackContext.error("Bad username or password");
+                return;
+            }
+
+            OutputStream output = ftpClient.storeFileStream(mTestFilename);
+            output.write("Hello Alto".getBytes());
+            output.close();
+
+            if (!ftpClient.completePendingCommand()) {
+                callbackContext.error("Could not write file");
+            }
+
+            ftpClient.deleteFile(mTestFilename);
+            ftpClient.logout();
+            ftpClient.disconnect();
+
+            callbackContext.success();
+        } catch (IOException e) {
+            callbackContext.error(e.getMessage());
+        }
+    }
+
+    private void _testConnectionSftp(String user, String password, String host, int port, CallbackContext callbackContext) {
         try {
             JSch jsch = new JSch();
-            String testFilename = "_altoTest";
 
             Session session = jsch.getSession(user, host, port);
             session.setPassword(password);
@@ -87,11 +105,11 @@ public class Mover extends CordovaPlugin {
             ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
             channel.connect();
 
-            OutputStream output = channel.put(testFilename);
+            OutputStream output = channel.put(mTestFilename);
             output.write("Hello Alto".getBytes());
             output.close();
 
-            channel.rm(testFilename);
+            channel.rm(mTestFilename);
             channel.disconnect();
 
             session.disconnect();
@@ -102,25 +120,103 @@ public class Mover extends CordovaPlugin {
         }
     }
 
-    private void connect(final String user, final String password, final String host, final int port, final CallbackContext callbackContext) {
+    private void testConnection(final JSONObject args, final CallbackContext callbackContext) {
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                final String user;
+                final String password;
+                final String host;
+                final String protocol;
+                final int port;
+                try {
+                    user = args.getString("user");
+                    password = args.getString("password");
+                    host = args.getString("host");
+                    protocol = args.getString("protocol");
+                } catch (JSONException e) {
+                    callbackContext.error(e.getMessage());
+                    return;
+                }
+
+                if (protocol == "SFTP") {
+                    port = args.optInt("port", 22);
+                    _testConnectionSftp(user, password, host, port, callbackContext);
+                } else {
+                    port = args.optInt("port", 21);
+                    _testConnectionFtp(user, password, host, port, callbackContext);
+                }
+            }
+        });
+    }
+
+    private void _connectSftp(String user, String password, String host, int port, CallbackContext callbackContext) throws JSchException {
+        JSch jsch = new JSch();
+
+        Session session = jsch.getSession(user, host, port);
+        session.setPassword(password);
+        session.setConfig("StrictHostKeyChecking", "no");
+        session.connect();
+
+        ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
+        channel.connect();
+
+        String key = UUID.randomUUID().toString();
+        mSftpChannels.put(key, channel);
+
+        callbackContext.success(key);
+    }
+
+    private void _connectFtp(String user, String password, String host, int port, CallbackContext callbackContext) throws IOException {
+        FTPClient ftpClient = new FTPClient();
+        ftpClient.connect(host, port);
+
+        int replyCode = ftpClient.getReplyCode();
+        if (!FTPReply.isPositiveCompletion(replyCode)) {
+            callbackContext.error("Operation failed. Server reply code: \" + replyCode");
+            return;
+        }
+
+        boolean success = ftpClient.login(user, password);
+
+        if (!success) {
+            callbackContext.error("Bad username or password");
+            return;
+        }
+
+        String key = UUID.randomUUID().toString();
+        mFtpChannels.put(key, ftpClient);
+
+        callbackContext.success(key);
+    }
+
+    private void connect(final JSONObject args, final CallbackContext callbackContext) {
         cordova.getThreadPool().execute(new Runnable() {
             public void run() {
 
                 try {
-                    JSch jsch = new JSch();
+                    final String user;
+                    final String password;
+                    final String host;
+                    final int port;
+                    final String protocol;
 
-                    Session session = jsch.getSession(user, host, port);
-                    session.setPassword(password);
-                    session.setConfig("StrictHostKeyChecking", "no");
-                    session.connect();
+                    try {
+                        user = args.getString("user");
+                        password = args.getString("password");
+                        host = args.getString("host");
+                        protocol = args.getString("protocol");
+                    } catch (JSONException e) {
+                        callbackContext.error(e.getMessage());
+                        return;
+                    }
 
-                    ChannelSftp channel = (ChannelSftp) session.openChannel("sftp");
-                    channel.connect();
-
-                    String key = UUID.randomUUID().toString();
-                    channels.put(key, channel);
-
-                    callbackContext.success(key);
+                    if (protocol == "SFTP") {
+                        port = args.optInt("port", 22);
+                        _connectSftp(user, password, host, port, callbackContext);
+                    } else {
+                        port = args.optInt("port", 21);
+                        _connectFtp(user, password, host, port, callbackContext);
+                    }
                 } catch (Exception e) {
                     callbackContext.error(e.getMessage());
                 }
@@ -128,85 +224,85 @@ public class Mover extends CordovaPlugin {
         });
     }
 
-    private void disconnect(String channelId, CallbackContext callbackContext){
-        ChannelSftp channel = channels.get(channelId);
-        Session session = null;
+    private void disconnect(JSONObject args, CallbackContext callbackContext) {
+        String channelId;
+        String protocol;
 
-        if (channel == null) {
-            callbackContext.error("Invalid channelId");
+        try {
+            channelId = args.getString("key");
+            protocol = args.getString("protocol");
+        } catch (JSONException e) {
+            callbackContext.error(e.getMessage());
             return;
         }
 
-        try {
-            session = channel.getSession();
-        } catch (JSchException e){
+        if (protocol == "SFTP") {
+            ChannelSftp channel = mSftpChannels.get(channelId);
+            Session session = null;
 
-        } finally {
-            channel.disconnect();
+            if (channel == null) {
+                callbackContext.error("Invalid channelId of " + channelId);
+                return;
+            }
 
-            if (session != null) {
-                session.disconnect();
+            try {
+                session = channel.getSession();
+            } catch (JSchException e){
+
+            } finally {
+                channel.disconnect();
+
+                if (session != null) {
+                    session.disconnect();
+                }
+            }
+        } else {
+            FTPClient ftpClient = mFtpChannels.get(channelId);
+
+            if (ftpClient == null) {
+                callbackContext.error("Invalid channelId of " + channelId);
+                return;
+            }
+
+            try {
+                ftpClient.logout();
+                ftpClient.disconnect();
+            } catch (IOException e){
+
             }
         }
 
         callbackContext.success();
     }
 
-    private void cd(String channelId, String path, CallbackContext callbackContext){
-        ChannelSftp channel = channels.get(channelId);
-
-        if (channel == null) {
-            callbackContext.error("Invalid channelId");
-            return;
-        }
-
-        try {
-            channel.cd(path);
-            callbackContext.success(channel.pwd());
-        } catch (SftpException e){
-            callbackContext.error(e.getMessage());
-        }
-    }
-
-    private void pwd(String channelId, CallbackContext callbackContext){
-        ChannelSftp channel = channels.get(channelId);
-
-        if (channel == null) {
-            callbackContext.error("Invalid channelId");
-            return;
-        }
-
-        try {
-            callbackContext.success(channel.pwd());
-        } catch (SftpException e){
-            callbackContext.error(e.getMessage());
-        }
-    }
-
-    private void put(final String rawArgs, final CallbackContext callbackContext) {
+    private void put(final JSONObject args, final CallbackContext callbackContext) {
         threadHelper(new SftpOp() {
             @Override
-            public void run(String channelId, ChannelSftp channel, JSONArray args) throws Exception {
+            public void run(ChannelSftp channel, FTPClient ftpClient, JSONObject args) throws Exception {
                 try {
-                    String name = args.getString(1);
-                    JSONObject dataContainer = args.getJSONObject(2);
-                    boolean ensurePath = args.getBoolean(3);
+                    String name = args.getString("name");
+                    JSONObject dataContainer = args.getJSONObject("dataContainer");
+                    boolean ensurePath = args.getBoolean("ensurePath");
 
                     if (ensurePath) {
-                        _ensurePath(channelId, name, true);
+                        _ensurePath(channel, ftpClient, name, true);
                     }
 
                     String type = dataContainer.getString("type");
 
                     Log.w("Wimsy", "Putting file " + name + " of type " + type);
 
-                    OutputStream output = channel.put(name);
+                    OutputStream output;
+
+                    if (channel != null) {
+                        output = channel.put(name);
+                    } else {
+                        output = ftpClient.storeFileStream(name);
+                    }
 
                     byte[] dataByteArray;
 
                     if (type.equals("Int8Array")) {
-                        Log.w("alto", "Is Int8Array");
-
                         JSONArray dataArray = dataContainer.getJSONArray("data");
                         dataByteArray = new byte[dataArray.length()];
 
@@ -217,104 +313,83 @@ public class Mover extends CordovaPlugin {
                         String data = dataContainer.getString("data");
                         dataByteArray = data.getBytes();
                     }
-                    Log.w("alto", dataByteArray.toString());
+
+                    Log.w("alto", "writing");
                     output.write(dataByteArray);
+                    Log.w("alto", "closing");
+                    output.flush();
                     output.close();
-                    callbackContext.success(channel.pwd());
+
+                    if (ftpClient != null && !ftpClient.completePendingCommand()) {
+                        callbackContext.error("Could not write file" + name);
+                    }
+                    Log.w("alto", "send success");
+
+                    if (channel != null) {
+                        callbackContext.success(channel.pwd());
+                    } else {
+                        callbackContext.success(ftpClient.pwd());
+                    }
+
                 } catch (Exception e) {
                     Log.e("alto", e.getClass().getName() + ":" + e.getMessage());
+                    e.printStackTrace();
+                    Log.e("alto", e.getStackTrace().toString());
                     callbackContext.error(e.getMessage());
                 }
+                Log.w("alto", "return");
             }
-        }, rawArgs, callbackContext);
+        }, args, callbackContext);
 
     }
 
-    private void rm(final String rawArgs, final CallbackContext callbackContext) {
+    private void rm(final JSONObject args, final CallbackContext callbackContext) {
         threadHelper(new SftpOp() {
             @Override
-            public void run(String channelId, ChannelSftp channel, JSONArray args) throws JSONException {
-                String name = args.getString(1);
+            public void run(ChannelSftp channel, FTPClient ftpClient, JSONObject args) throws JSONException {
+                String name = args.getString("name");
                 Log.w("Wimsy", "Deleting file " + name);
 
                 try {
-                    channel.rm(name);
+                    if (channel != null) {
+                        channel.rm(name);
+                    } else {
+                        ftpClient.deleteFile(name);
+                    }
                     callbackContext.success();
-                } catch (SftpException e) {
-                    callbackContext.success("File not found");
+                } catch (Exception e) {
+                    callbackContext.success("File not found: " + name);
                 }
+
             }
-        }, rawArgs, callbackContext);
+        }, args, callbackContext);
 
     }
 
-    private void rmdir(final String rawArgs, final CallbackContext callbackContext) {
+    private void rmdir(final JSONObject args, final CallbackContext callbackContext) {
         threadHelper(new SftpOp() {
             @Override
-            public void run(String channelId, ChannelSftp channel, JSONArray args) throws JSONException {
-                String name = args.getString(1);
+            public void run(ChannelSftp channel, FTPClient ftpClient, JSONObject args) throws JSONException {
+                String name = args.getString("name");
                 Log.w("Wimsy", "Deleting folder " + name);
 
                 try {
-                    channel.rmdir(name);
+                    if (channel != null) {
+                        channel.rmdir(name);
+                    } else {
+                        ftpClient.rmd(name);
+                    }
+
                     callbackContext.success();
-                } catch (SftpException e) {
-                    callbackContext.success("File not found");
+                } catch (Exception e) {
+                    callbackContext.success("File not found: " + name);
                 }
             }
-        }, rawArgs, callbackContext);
+        }, args, callbackContext);
 
     }
 
-    private void mkdir(String channelId, String path, boolean recursive, CallbackContext callbackContext){
-        ChannelSftp channel = channels.get(channelId);
-
-        if (channel == null) {
-            callbackContext.error("Invalid channelId");
-            return;
-        }
-
-        try {
-
-            if (recursive) {
-                _ensurePath(channelId, path);
-            } else {
-                channel.mkdir(path);
-            }
-
-            callbackContext.success();
-        } catch (Exception e){
-            callbackContext.error(e.getMessage());
-        }
-    }
-
-    private void stat(String channelId, String path, CallbackContext callbackContext){
-        ChannelSftp channel = channels.get(channelId);
-
-        if (channel == null) {
-            callbackContext.error("Invalid channelId");
-            return;
-        }
-
-        try {
-            channel.stat(path);
-            callbackContext.success();
-        } catch (Exception e){
-            callbackContext.error(e.getMessage());
-        }
-    }
-
-    private void _ensurePath(String channelId, String path) throws Exception {
-        _ensurePath(channelId, path, false);
-    }
-
-    private void _ensurePath(String channelId, String path, boolean excludeLast) throws Exception {
-        ChannelSftp channel = channels.get(channelId);
-
-        if (channel == null) {
-            throw new Exception("Invalid channelId");
-        }
-
+    private void _ensurePath(ChannelSftp channel, FTPClient ftpClient, String path, boolean excludeLast) throws Exception {
         String buildPath = "";
         if (path.substring(0, 1).equals("/")) {
             path = path.substring(1);
@@ -331,29 +406,55 @@ public class Mover extends CordovaPlugin {
         for (int i=0; i<size; i++) {
             buildPath += pathSegments[i] + "/";
 
-            try {
-                channel.stat(buildPath);
-            } catch (Exception e) {
-                channel.mkdir(buildPath);
+            if (channel != null) {
+                try {
+                    channel.stat(buildPath);
+                } catch (Exception e) {
+                    channel.mkdir(buildPath);
+                }
+            } else {
+                ftpClient.makeDirectory(buildPath);
             }
+
         }
     }
 
-    private void threadHelper(final SftpOp f, final String rawArgs, final CallbackContext callbackContext) {
+    private void threadHelper(final SftpOp f, final JSONObject args, final CallbackContext callbackContext) {
+
         cordova.getThreadPool().execute(new Runnable() {
             public void run() {
                 try {
-                    JSONArray args = new JSONArray(rawArgs);
-                    String channelId = args.getString(0);
-                    ChannelSftp channel = channels.get(channelId);
+                    String protocol = args.getString("protocol");
+                    String cacheKey = args.getString("key");
 
-                    if (channel == null) {
-                        callbackContext.error("Invalid channelId");
-                        return;
+                    if (protocol == "SFTP") {
+                        ChannelSftp channel = mSftpChannels.get(cacheKey);
+
+                        if (channel == null) {
+                            callbackContext.error("Invalid channelId");
+                            return;
+                        }
+
+                        synchronized (mSftpChannels) {
+                            Log.w("alto", "Starting");
+                            f.run(channel, null, args);
+                            Log.w("alto", "Done");
+                        }
+                    } else {
+                        FTPClient client = mFtpChannels.get(cacheKey);
+
+                        if (client == null) {
+                            callbackContext.error("Invalid clientId");
+                            return;
+                        }
+
+                        synchronized (mFtpChannels) {
+                            Log.w("alto", "Starting");
+                            f.run(null, client, args);
+                            Log.w("alto", "Done");
+                        }
                     }
-                    synchronized (channel) {
-                        f.run(channelId, channel, args);
-                    }
+
                 } catch ( Exception e) {
                     if (e instanceof JSONException ) {
                         callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.JSON_EXCEPTION));
