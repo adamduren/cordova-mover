@@ -52,7 +52,8 @@ Connection.prototype.connect = function connect(user, password, host, port, prot
 
 Connection.prototype.disconnect = function disconnect() {
   var promise = promiseHelper('disconnect', {
-    key: this.key
+    key: this.key,
+    protocol: this.protocol,
   });
   var _this = this;
 

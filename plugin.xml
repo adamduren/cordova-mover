@@ -29,6 +29,7 @@
         <source-file src="lib/android/jsch-0.1.51.jar" target-dir="libs" />
         <source-file src="lib/android/commons-io-2.4.jar" target-dir="libs" />
         <source-file src="lib/android/commons-net-3.4.jar" target-dir="libs" />
+        <source-file src="src/android/BaseMover.java" target-dir="src/com/alto/mover" />
         <source-file src="src/android/Mover.java" target-dir="src/com/alto/mover" />
      </platform>
 </plugin>
