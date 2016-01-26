@@ -7,6 +7,7 @@ import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 
+import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPReply;
 import org.json.JSONArray;
@@ -157,6 +158,8 @@ public class BaseMover {
             callbackContext.error("Bad username or password");
             return;
         }
+
+        ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
 
         String key = UUID.randomUUID().toString();
         mFtpChannels.put(key, ftpClient);
