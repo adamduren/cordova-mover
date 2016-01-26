@@ -4,6 +4,7 @@ import android.util.Log;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -38,8 +39,8 @@ public class Mover extends CordovaPlugin {
         Log.i("Wimsy", "Executing action: " + action);
 
         ContextProxy contextProxy = new ContextProxy(callbackContext);
-
-        final JSONObject args = new JSONObject(rawArgs);
+        final JSONArray argsArray = new JSONArray(rawArgs);
+        final JSONObject args = new JSONObject(argsArray.getString(0));
         if (action.equals("testConnection")) {
             this.testConnection(args, contextProxy);
         } else if (action.equals("connect")) {
@@ -86,7 +87,6 @@ public class Mover extends CordovaPlugin {
                 mover.put(args, callbackContext);
             }
         });
-
     }
 
     private void rm(final JSONObject args, final BaseMover.IMoverInterface callbackContext) {
@@ -95,7 +95,6 @@ public class Mover extends CordovaPlugin {
                 mover.rm(args, callbackContext);
             }
         });
-
     }
 
     private void rmdir(final JSONObject args, final BaseMover.IMoverInterface callbackContext) {
@@ -104,6 +103,5 @@ public class Mover extends CordovaPlugin {
                 mover.rmdir(args, callbackContext);
             }
         });
-
     }
 }

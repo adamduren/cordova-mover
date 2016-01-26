@@ -5,8 +5,8 @@
 
 var className = 'Mover';
 
-function promiseHelper(method, params) {
-  params = params || [];
+function promiseHelper(method, data) {
+  data = JSON.stringify(data || {});
 
   var promise = new Promise(function(resolve, reject) {
     try {
@@ -15,7 +15,7 @@ function promiseHelper(method, params) {
         function() { reject.apply(null, arguments); },
         className,
         method,
-        params
+        [data]
       );
     } catch (e) {
       reject(e);
