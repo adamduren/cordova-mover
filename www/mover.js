@@ -66,26 +66,12 @@ Connection.prototype.disconnect = function disconnect() {
 
 Connection.prototype.put = function put(name, data, ensurePath) {
   ensurePath = !!ensurePath;
-  let type = typeof(data);
-  let dataContainer = {};
 
-  if (typeof data === 'object') {
-    if (window.ArrayBuffer.isView(data)) {
-      dataContainer.data = Array.from(data);
-      dataContainer.type = 'Int8Array';
-    } else {
-      dataContainer.data = JSON.stringify(data);
-      dataContainer.type = 'string';
-    }
-  } else {
-    dataContainer.data = data;
-    dataContainer.type = type;
-  }
   return promiseHelper('put', {
     key: this.key,
     protocol: this.protocol,
     name: name,
-    dataContainer: dataContainer,
+    dataContainer: data,
     ensurePath: ensurePath,
   });
 };

@@ -10,10 +10,12 @@ import com.jcraft.jsch.Session;
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPReply;
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
@@ -275,13 +277,14 @@ public class BaseMover {
 
                     byte[] dataByteArray;
 
-                    if (type.equals("Int8Array")) {
-                        JSONArray dataArray = dataContainer.getJSONArray("data");
-                        dataByteArray = new byte[dataArray.length()];
-
-                        for (int i = 0; i < dataArray.length(); i++) {
-                            dataByteArray[i] = (byte) dataArray.getInt(i);
-                        }
+                    if (type.equals("url")) {
+                        // Strips the file:// prefix
+                        String url = dataContainer.getString("data").substring(7);
+                        File file = new File(url);
+                        dataByteArray = new byte[(int) file.length()];
+                        DataInputStream dis = new DataInputStream(new FileInputStream(file));
+                        dis.readFully(dataByteArray);
+                        dis.close();
                     } else {
                         String data = dataContainer.getString("data");
                         dataByteArray = data.getBytes();
