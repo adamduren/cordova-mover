@@ -9,6 +9,7 @@ import com.jcraft.jsch.Session;
 
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPFile;
 import org.apache.commons.net.ftp.FTPReply;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -56,6 +57,9 @@ public class BaseMover {
                 callbackContext.error("Bad username or password");
                 return;
             }
+
+            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+            ftpClient.enterLocalPassiveMode();
 
             OutputStream output = ftpClient.storeFileStream(mTestFilename);
             output.write("Hello Alto".getBytes());
@@ -162,6 +166,7 @@ public class BaseMover {
         }
 
         ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+        ftpClient.enterLocalPassiveMode();
 
         String key = UUID.randomUUID().toString();
         mFtpChannels.put(key, ftpClient);
@@ -278,8 +283,16 @@ public class BaseMover {
                     byte[] dataByteArray;
 
                     if (type.equals("url")) {
-                        // Strips the file:// prefix
-                        String url = dataContainer.getString("data").substring(7);
+                        String url = dataContainer.getString("data");
+
+                        if (dataContainer.getString("data").startsWith("file://")) {
+                            // Strips the file:// prefix
+                            url = url.substring(7);
+                        } else if (dataContainer.getString("data").startsWith("file:")) {
+                            // Strips the file: prefix
+                            url = url.substring(5);
+                        }
+
                         File file = new File(url);
                         dataByteArray = new byte[(int) file.length()];
                         DataInputStream dis = new DataInputStream(new FileInputStream(file));
@@ -299,7 +312,10 @@ public class BaseMover {
                     if (ftpClient != null && !ftpClient.completePendingCommand()) {
                         callbackContext.error("Could not write file" + name);
                     }
+
                     Log.w("alto", "send success");
+
+                    ftpClient.site("CHMOD 744 " + name);
 
                     if (channel != null) {
                         callbackContext.success();
@@ -390,6 +406,7 @@ public class BaseMover {
                 }
             } else {
                 ftpClient.makeDirectory(buildPath);
+                ftpClient.site("CHMOD 755 " + buildPath);
             }
 
         }
