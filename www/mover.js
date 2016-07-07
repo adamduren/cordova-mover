@@ -90,7 +90,15 @@ Connection.prototype.rmdir = function rmdir(name) {
     protocol: this.protocol,
     name: name,
   });
-};
+ };
+
+ Connection.prototype.ls = function ls(name) {
+   return promiseHelper('ls', {
+     key: this.key,
+     protocol: this.protocol,
+     name: name,
+   });
+  };
 
 module.exports = {
   testConnection: function (user, password, host, port, protocol) {

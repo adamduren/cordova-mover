@@ -8,6 +8,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+
 public class Mover extends CordovaPlugin {
     final BaseMover mover = new BaseMover();
 
@@ -16,6 +19,22 @@ public class Mover extends CordovaPlugin {
 
         ContextProxy(CallbackContext callbackContext) {
             this.callbackContext = callbackContext;
+        }
+
+        @Override
+        public void success(ArrayList<HashMap<String, String>> messages) {
+            JSONArray encoded_messages;
+
+            try {
+                encoded_messages = new JSONArray();
+                for (HashMap<String, String> message: messages) {
+                    encoded_messages.put(new JSONObject(message));
+                }
+            } catch (Exception e) {
+                encoded_messages = new JSONArray();
+            }
+
+            this.callbackContext.success(encoded_messages);
         }
 
         @Override
@@ -53,6 +72,8 @@ public class Mover extends CordovaPlugin {
             this.rm(args, contextProxy);
         }  else if (action.equals("rmdir")) {
             this.rmdir(args, contextProxy);
+        }  else if (action.equals("ls")) {
+            this.ls(args, contextProxy);
         } else {
             return false;
         }
@@ -101,6 +122,14 @@ public class Mover extends CordovaPlugin {
         cordova.getThreadPool().execute(new Runnable() {
             public void run() {
                 mover.rmdir(args, callbackContext);
+            }
+        });
+    }
+
+    private void ls(final JSONObject args, final BaseMover.IMoverInterface callbackContext) {
+        cordova.getThreadPool().execute(new Runnable() {
+            public void run() {
+                mover.ls(args, callbackContext);
             }
         });
     }

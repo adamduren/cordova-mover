@@ -6,6 +6,7 @@ import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SftpATTRS;
 
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
@@ -19,9 +20,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.UUID;
+import java.util.Vector;
 
 
 public class BaseMover {
@@ -36,6 +39,7 @@ public class BaseMover {
 
     public interface IMoverInterface {
         void success(String message);
+        void success(ArrayList<HashMap<String, String>> messages);
         void success();
         void error(String message);
     }
@@ -315,7 +319,9 @@ public class BaseMover {
 
                     Log.w("alto", "send success");
 
-                    ftpClient.site("CHMOD 744 " + name);
+                    if (ftpClient != null) {
+                        ftpClient.site("CHMOD 744 " + name);
+                    }
 
                     if (channel != null) {
                         callbackContext.success();
@@ -375,6 +381,61 @@ public class BaseMover {
                     callbackContext.success();
                 } catch (Exception e) {
                     callbackContext.success("File not found: " + name);
+                }
+            }
+        }, args, callbackContext);
+
+    }
+
+    public void ls(final JSONObject args, final IMoverInterface callbackContext) {
+        commandHelper(new SftpOp() {
+            @Override
+            public void run(ChannelSftp channel, FTPClient ftpClient, JSONObject args) throws JSONException {
+                String name = args.getString("name");
+                Log.w("Wimsy", "Listing directory " + name);
+                ArrayList<String> folderNamesTemp = new ArrayList<String>();
+                String[] folderNames;
+
+                try {
+                    if (channel != null) {
+                        Vector<ChannelSftp.LsEntry> entries = channel.ls(name);
+                        for(ChannelSftp.LsEntry entry: entries) {
+                            SftpATTRS attrs = entry.getAttrs();
+                            if (attrs.isDir()) {
+                              folderNamesTemp.add(entry.getFilename());
+                            }
+                        }
+                    } else {
+                        ftpClient.listDirectories(name);
+                        FTPFile[] entries = ftpClient.listDirectories(name);
+                        for(FTPFile entry: entries) {
+                            folderNamesTemp.add(entry.getName());
+                        }
+                    }
+
+                    folderNames = new String[folderNamesTemp.size()];
+                    folderNamesTemp.toArray(folderNames);
+                    Arrays.sort(folderNames);
+                    ArrayList<HashMap<String, String>> folderNameMaps = new ArrayList<HashMap<String, String>>();
+
+                    HashMap<String, String> folderNameMap = new HashMap<String, String>();
+                    folderNameMap.put("name", "..");
+                    folderNameMap.put("path", name + "/..");
+                    folderNameMaps.add(folderNameMap);
+
+                    for (String filename: folderNames) {
+                        if (filename.equals(".") || filename.equals("..")) {
+                          continue;
+                        }
+                        folderNameMap = new HashMap<String, String>();
+                        folderNameMap.put("name", filename);
+                        folderNameMap.put("path", name + "/" + filename);
+                        folderNameMaps.add(folderNameMap);
+                    }
+
+                    callbackContext.success(folderNameMaps);
+                } catch (Exception e) {
+                    callbackContext.success(e.getMessage());
                 }
             }
         }, args, callbackContext);
